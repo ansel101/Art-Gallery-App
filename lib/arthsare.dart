@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'profile_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:io';
 
 void main() {
   runApp(ArtShareApp());
@@ -54,6 +57,8 @@ class ArtworkGalleryPage extends StatefulWidget {
 class _ArtworkGalleryPageState extends State<ArtworkGalleryPage> {
   List<Artwork> artworks = [];
   TextEditingController _searchController = TextEditingController();
+  File? _pickedImage;
+  TextEditingController _descriptionController = TextEditingController();
 
   @override
   void initState() {
@@ -106,6 +111,79 @@ class _ArtworkGalleryPageState extends State<ArtworkGalleryPage> {
     });
   }
 
+  Future<void> _pickImage() async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _pickedImage = File(pickedFile.path);
+      });
+      _showUploadConfirmation();
+    }
+  }
+
+  Future<void> _uploadArtwork() async {
+    if (_pickedImage == null || _descriptionController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Please select an image and provide a description")),
+      );
+      return;
+    }
+
+    final storageRef = FirebaseStorage.instance.ref().child('artworks/${DateTime.now().toString()}');
+    final uploadTask = storageRef.putFile(_pickedImage!);
+    final snapshot = await uploadTask;
+
+    final imageUrl = await snapshot.ref.getDownloadURL();
+
+    await FirebaseFirestore.instance.collection('artworks').add({
+      'title': 'New Artwork',
+      'artist': widget.fullName,
+      'username': widget.username,
+      'imageUrl': imageUrl,
+      'description': _descriptionController.text,
+      'likes': 0,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    setState(() {
+      _pickedImage = null;
+      _descriptionController.clear();
+    });
+
+    // Call _fetchArtworks() after state change to update the artwork list
+    _fetchArtworks();
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Artwork uploaded successfully!')));
+  }
+
+  void _showUploadConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Add Description'),
+          content: TextField(
+            controller: _descriptionController,
+            decoration: InputDecoration(hintText: 'Add a description for your artwork'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close the dialog
+              },
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: _uploadArtwork,
+              child: Text('Upload'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -113,7 +191,6 @@ class _ArtworkGalleryPageState extends State<ArtworkGalleryPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // Top Navigation
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Row(
@@ -131,17 +208,13 @@ class _ArtworkGalleryPageState extends State<ArtworkGalleryPage> {
                     icon: Icon(Icons.mail, color: Colors.grey[500]),
                     onPressed: () {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text("This feature isn't available at the moment"),
-                        ),
+                        SnackBar(content: Text("This feature isn't available at the moment")),
                       );
                     },
                   )
                 ],
               ),
             ),
-
-            // Search Bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: TextField(
@@ -163,8 +236,6 @@ class _ArtworkGalleryPageState extends State<ArtworkGalleryPage> {
                 ),
               ),
             ),
-
-            // Artwork Grid
             Expanded(
               child: artworks.isNotEmpty
                   ? GridView.builder(
@@ -181,10 +252,7 @@ class _ArtworkGalleryPageState extends State<ArtworkGalleryPage> {
                 },
               )
                   : Center(
-                child: Text(
-                  'No artworks found',
-                  style: TextStyle(color: Colors.grey[500]),
-                ),
+                child: Text('No artworks found', style: TextStyle(color: Colors.grey[500])),
               ),
             ),
           ],
@@ -192,20 +260,11 @@ class _ArtworkGalleryPageState extends State<ArtworkGalleryPage> {
       ),
       bottomNavigationBar: BottomNavigationBar(
         items: [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Gallery',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Gallery'),
           BottomNavigationBarItem(
             icon: IconButton(
               icon: Icon(Icons.upload_outlined),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text("This feature isn't available at the moment"),
-                  ),
-                );
-              },
+              onPressed: _pickImage, // Open gallery on press
             ),
             label: 'Upload',
           ),
@@ -258,7 +317,6 @@ class _ArtworkCardState extends State<ArtworkCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Artwork Image
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
                       child: Image.network(
@@ -268,41 +326,29 @@ class _ArtworkCardState extends State<ArtworkCard> {
                       ),
                     ),
                     SizedBox(height: 16),
-                    // Title
                     Text(
                       widget.artwork.title,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                     ),
                     SizedBox(height: 8),
-                    // Artist
-                    Text(
-                      'by ${widget.artwork.artist} (${widget.artwork.username})',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey[600],
-                      ),
-                    ),
+                    Text('by ${widget.artwork.artist}', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
+                    SizedBox(height: 8),
+                    Text(widget.artwork.description, style: TextStyle(fontSize: 16)),
                     SizedBox(height: 16),
-                    // Description
-                    Text(
-                      widget.artwork.description,
-                      style: TextStyle(
-                        fontSize: 16,
-                      ),
-                    ),
-                    SizedBox(height: 16),
-                    // Likes
                     Row(
                       children: [
-                        Icon(
-                          _isLiked ? Icons.favorite : Icons.favorite_border,
-                          color: _isLiked ? Colors.red : Colors.grey,
+                        IconButton(
+                          icon: Icon(
+                            _isLiked ? FontAwesomeIcons.solidHeart : FontAwesomeIcons.heart,
+                            color: _isLiked ? Colors.red : Colors.grey,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _isLiked = !_isLiked;
+                            });
+                          },
                         ),
-                        SizedBox(width: 8),
-                        Text('${widget.artwork.likes} likes'),
+                        Text('${widget.artwork.likes}', style: TextStyle(fontSize: 16)),
                       ],
                     ),
                   ],
@@ -321,83 +367,34 @@ class _ArtworkCardState extends State<ArtworkCard> {
       onTap: _showArtworkDetails,
       child: Card(
         elevation: 4,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Artwork Image
             ClipRRect(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+              borderRadius: BorderRadius.circular(12),
               child: Image.network(
                 widget.artwork.imageUrl,
-                height: 150,
-                width: double.infinity,
+                height: 200,  // Ensuring uniform height
                 fit: BoxFit.cover,
               ),
             ),
-            // Artwork Details
             Padding(
               padding: const EdgeInsets.all(8.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Title and Like Button
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          widget.artwork.title,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      // Like Button
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _isLiked = !_isLiked;
-                            _isLiked
-                                ? widget.artwork.likes++
-                                : widget.artwork.likes--;
-                          });
-                        },
-                        child: Row(
-                          children: [
-                            Icon(
-                              _isLiked ? Icons.favorite : Icons.favorite_border,
-                              color: _isLiked ? Colors.red : Colors.grey,
-                              size: 16,
-                            ),
-                            SizedBox(width: 4),
-                            Text(
-                              '${widget.artwork.likes}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  // Username
-                  SizedBox(height: 4),
-                  Text(
-                    widget.artwork.username,
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+              child: Text(
+                widget.artwork.title,
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: Text(
+                'by ${widget.artwork.artist}',
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
